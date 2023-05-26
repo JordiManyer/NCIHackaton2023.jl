@@ -11,10 +11,11 @@ using NCIHackaton2023
 
 # Parameters
 D = 2                             # Problem dimension
-fe_orders   = Tuple(fill(1,D))    # FE element orders
-quad_orders = Tuple(fill(2,D))    # Quadrature orders 
+fe_orders   = Tuple(fill(4,D))    # FE element orders
+quad_orders = Tuple(fill(6,D))    # Quadrature orders 
 
-# Setup 
+# Setup
+n = 20
 domain    = repeat([0,1],D)
 partition = fill(4,D)
 model     = CartesianDiscreteModel(domain,partition)

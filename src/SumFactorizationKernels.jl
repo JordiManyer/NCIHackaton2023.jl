@@ -178,11 +178,11 @@ end
 
   # Computes the linear index from the tensor index
   idx_linear = idx[1]
-    for d in 1:D-1
-      ik = idx[d+1]
-      for k in 1:d
-          ik = :(($ik-1) * $(sizes[k]))
-      end
+  for d in 1:D-1
+    ik = idx[d+1]
+    for k in 1:d
+      ik = :(($ik-1) * $(sizes[k]))
+    end
     idx_linear = :($idx_linear + $ik) 
   end
   

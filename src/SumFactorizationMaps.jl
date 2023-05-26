@@ -32,8 +32,8 @@ function SumFactorizationMap(D::Int,fe_orders::Tuple,quad_orders::Tuple)
 
   dof_map = _get_dof_map(poly,fe_orders)
 
-  SB = map(x->x+1,fe_orders)
-  SQ = map(x->x,quad_orders)
+  SB = map(b->length(b),basis1D)
+  SQ = map(q->length(get_weights(q)),quads1D)
   return SumFactorizationMap{D,SB,SQ}([evalMats,gradMats],dof_map)
 end
 
@@ -53,10 +53,10 @@ function Arrays.evaluate!(cache,m::SumFactorizationMap{D,SB,SQ},x,wq,jq,djq) whe
   evalMats, gradMats = m.mats
   dof_map = m.dof_map
 
-  _sumfac_array2tensor!(m,Z_vector[1],x,dof_map)   # Copy dofs to tensor
-  _sumfac_dof2quad!(m,gradMats,Z_vector)       # Compute the gradient of u
+  _sumfac_array2tensor!(m,Z_vector[1],x,dof_map)    # Copy dofs to tensor
+  _sumfac_dof2quad!(m,gradMats,Z_vector)            # Compute the gradient of u
   _sumfac_apply_weights!(m,Z_vector[end],wq,jq,djq) # Apply pullback and quad weights
-  _sumfac_quad2dof!(m,gradMats,Z_vector)       # Apply gradient of v
-  _sumfac_tensor2array!(m,Z_vector[1],y,dof_map)   # Transfer result back to y
+  _sumfac_quad2dof!(m,gradMats,Z_vector)            # Apply gradient of v
+  _sumfac_tensor2array!(m,Z_vector[1],y,dof_map)    # Transfer result back to y
   return y
 end

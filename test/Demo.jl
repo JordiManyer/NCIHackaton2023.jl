@@ -1,3 +1,10 @@
+"""
+  This demo solves a Poisson problem with Dirichlet boundary conditions, using a traditional 
+  assembled matrix and a sum-factorization based matrix.
+
+  For D = 3 and high FE orders, the sum-factorization based matrix is faster than the assembled
+  version (while consuming virtually no storage space). 
+"""
 
 using Test
 using BenchmarkTools

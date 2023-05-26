@@ -1,0 +1,15 @@
+name = "NCIHackaton2023"
+uuid = "f312b40a-25f4-47ac-8768-1c2f04d70b82"
+authors = ["JordiManyer <jordi.manyer@monash.edu>"]
+version = "0.1.0"
+
+[deps]
+BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
+FillArrays = "1a297f60-69ca-5386-bcde-b61e274b549b"
+Gridap = "56d4f2e9-7ea1-5844-9cf6-b9c51ca7ce8e"
+IterativeSolvers = "42fd0dbc-a981-5370-80f2-aaf504508153"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+LoopVectorization = "bdcacae8-1622-11e9-2a5c-532679323890"
+
+[compat]
+FillArrays = "0.13"

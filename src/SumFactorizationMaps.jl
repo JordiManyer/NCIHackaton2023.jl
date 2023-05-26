@@ -55,7 +55,7 @@ function Arrays.evaluate!(cache,m::SumFactorizationMap{D,SB,SQ},x,wq,jq,djq) whe
 
   _sumfac_array2tensor!(m,Z_vector[1],x,dof_map)   # Copy dofs to tensor
   _sumfac_dof2quad!(m,gradMats,Z_vector)       # Compute the gradient of u
-  _sumfac_apply_weights!(m,Z_vector[end],reshape(wq,SQ),reshape(jq,SQ),reshape(djq,SQ)) # Apply pullback and quad weights
+  _sumfac_apply_weights!(m,Z_vector[end],wq,jq,djq) # Apply pullback and quad weights
   _sumfac_quad2dof!(m,gradMats,Z_vector)       # Apply gradient of v
   _sumfac_tensor2array!(m,Z_vector[1],y,dof_map)   # Transfer result back to y
   return y

@@ -174,7 +174,17 @@ end
 @generated function _sumfac_apply_weights!(::SumFactorizationMap{D,SB,SQ},Z,wq,jq,djq) where D where SB where SQ
   idx = map(x -> Symbol("i$x"),1:D)
   sizes = SQ[1:D]
-  loop_lims   = map((xi,si,spacer) -> "$xi in 1:$si $spacer",idx,sizes,[fill(", ",D-1)...,""])
+  loop_lims = map((xi,si,spacer) -> "$xi in 1:$si $spacer",idx,sizes,[fill(", ",D-1)...,""])
+
+  # Computes the linear index from the tensor index
+  idx_linear = idx[1]
+    for d in 1:D-1
+      ik = idx[d+1]
+      for k in 1:d
+          ik = :(($ik-1) * $(sizes[k]))
+      end
+    idx_linear = :($idx_linear + $ik) 
+  end
   
   lines = Vector{Expr}()
   for r in 1:D # Computes the new components
@@ -183,7 +193,7 @@ end
       for k in 1:D
           j_rk = :(0.0)
           for l in 1:D
-              j_rk = :( $j_rk + jq[$(idx...)][$l,$r] * jq[$(idx...)][$l,$k] )
+              j_rk = :( $j_rk + jq[$idx_linear][$l,$r] * jq[$idx_linear][$l,$k] )
           end
           c_r = :($c_r + $j_rk * Z[$k,$(idx...)])
       end
@@ -194,7 +204,7 @@ end
   
   for r in 1:D # Overwrite old components with the new ones.
       z_r = Symbol("z_$r")
-      line = :( Z[$r,$(idx...)] = $z_r * wq[$(idx...)] * djq[$(idx...)] )
+      line = :( Z[$r,$(idx...)] = $z_r * wq[$idx_linear] * djq[$idx_linear] )
       push!(lines,line)
   end
   

@@ -1,4 +1,5 @@
 
+using Test
 using BenchmarkTools
 using LinearAlgebra
 using IterativeSolvers
@@ -10,7 +11,7 @@ using Gridap.Arrays
 using NCIHackaton2023
 
 # Parameters
-D = 2                             # Problem dimension
+D = 3                             # Problem dimension
 fe_orders   = Tuple(fill(4,D))    # FE element orders
 quad_orders = Tuple(fill(6,D))    # Quadrature orders 
 
@@ -46,7 +47,7 @@ A_lazy = LazyMatrix(m,U,V,dΩ)
 y  = ones(size(b))
 x1 = zeros(size(b)); mul!(x1,A,y)
 x2 = zeros(size(b)); mul!(x2,A_lazy,y)
-x1 ≈ x2
+@test norm(x1 - x2) < 1e-6
 
 ############################################################################################
 

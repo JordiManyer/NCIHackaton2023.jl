@@ -10,6 +10,7 @@ Gridap = "56d4f2e9-7ea1-5844-9cf6-b9c51ca7ce8e"
 IterativeSolvers = "42fd0dbc-a981-5370-80f2-aaf504508153"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 LoopVectorization = "bdcacae8-1622-11e9-2a5c-532679323890"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [compat]
 FillArrays = "0.13"

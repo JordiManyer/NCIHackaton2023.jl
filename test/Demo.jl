@@ -23,9 +23,9 @@ fe_orders   = Tuple(fill(4,D))    # FE element orders
 quad_orders = Tuple(fill(6,D))    # Quadrature orders 
 
 # Setup
-n = 20
+n = 10
 domain    = repeat([0,1],D)
-partition = fill(4,D)
+partition = fill(n,D)
 model     = CartesianDiscreteModel(domain,partition)
 
 Ω  = Triangulation(model)

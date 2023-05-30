@@ -16,6 +16,18 @@ These implementations compete with the traditional sparse matrix-vector product 
 have traditionally been memory-bound. The advantages of sum-factorization techniques become
 very noticeable for high-order FE schemes.
 
+## Profiling
+
+### CPU-only: Profile.jl + Flamegraphs.jl/PProf.jl
+
+Compile the profiles by running from the project directory the following command
+
+```bash
+  julia --project=. profiling/profile.jl
+```
+
+Visualize the profiles by interactively running `profiling/viz_profile.jl`. You can choose between flamegraph vizualisation or PProf.
+
 ## Literature
 
 - [S.Müthing 2017](https://arxiv.org/abs/1711.10885)

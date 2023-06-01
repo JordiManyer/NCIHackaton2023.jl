@@ -26,3 +26,7 @@ Manifest.toml
 # Profile temps
 *.pb.gz
 *.jlprof
+
+# VSCode 
+.vscode
+

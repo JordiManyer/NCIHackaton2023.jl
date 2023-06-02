@@ -28,6 +28,17 @@ Compile the profiles by running from the project directory the following command
 
 Visualize the profiles by interactively running `profiling/viz_profile.jl`. You can choose between flamegraph vizualisation or PProf.
 
+## Benchmarking
+
+Run the benchmarks by running from the project directory the following command
+
+```bash
+  julia --project=. -O3 --check-bounds=no profiling/benchmark.jl
+```
+
+or from GADI submit the job `benchmark.sh`.
+The results will get stored in `data/benchmarks`, and can be visualized with the script `profiling/viz_benchmark.jl`.
+
 ## Literature
 
 - [S.Müthing 2017](https://arxiv.org/abs/1711.10885)

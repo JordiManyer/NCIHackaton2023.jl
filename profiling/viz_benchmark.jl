@@ -29,3 +29,4 @@ for (i,sub_df) in enumerate(dfgr)
 end
 
 @show plt
+savefig(plt,"figures/benchmark.png")

@@ -26,3 +26,8 @@ Manifest.toml
 # Profile temps
 *.pb.gz
 *.jlprof
+
+# Gadi outputs
+*.o*
+*.e*
+

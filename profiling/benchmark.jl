@@ -16,10 +16,10 @@ end
 function benchmark_cg(x::AbstractVector,A::AbstractMatrix,b::AbstractVector;niter=10)
   times = Vector{Float64}(undef,niter)
   fill!(x,0.0)
-  cg!(x,A,b) # warmup
+  cg!(x,A,b,maxiter=10) # warmup
   for it in 1:niter
     fill!(x,0.0)
-    times[it] = @elapsed cg!(x,A,b)
+    times[it] = @elapsed cg!(x,A,b,maxiter=10)
   end
   return minimum(times), maximum(times)
 end

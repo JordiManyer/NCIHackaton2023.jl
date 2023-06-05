@@ -4,11 +4,8 @@ authors = ["JordiManyer <jordi.manyer@monash.edu>"]
 version = "0.1.0"
 
 [deps]
-<<<<<<< HEAD
 Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
-=======
 BSON = "fbb218c0-5317-5bc6-957e-2ee96dd4b1f0"
->>>>>>> ccfcf79e2a70735809b87b593e26b0027edc413a
 BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"

@@ -30,3 +30,9 @@ Manifest.toml
 # VSCode 
 .vscode
 
+# Gadi outputs
+*.o*
+*.e*
+
+# System Image
+Environment.so

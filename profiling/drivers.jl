@@ -1,4 +1,5 @@
 using IterativeSolvers
+using LinearAlgebra
 using Gridap
 using NCIHackaton2023
 
@@ -50,6 +51,12 @@ end
 
 function compute_solution(A::AbstractMatrix,b::AbstractVector)
   x = zeros(size(b))
+  x = cg!(x,A,b)
+  return x  
+end
+
+function compute_solution!(x::AbstractVector,A::AbstractMatrix,b::AbstractVector)
+  fill!(x,0.0)
   x = cg!(x,A,b)
   return x  
 end

@@ -31,3 +31,5 @@ Manifest.toml
 *.o*
 *.e*
 
+# System Image
+Environment.so

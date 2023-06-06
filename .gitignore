@@ -27,9 +27,13 @@ Manifest.toml
 *.pb.gz
 *.jlprof
 
+# VSCode 
+.vscode
+
 # Gadi outputs
 *.o*
 *.e*
+*.nsys-rep
 
 # System Image
 Environment.so

@@ -85,7 +85,6 @@ gpu_Zk = [CuArray(zeros(nt*D*prod(SQ[1:d-1])*prod(SB[d:D]))) for d in 1:D+1]
 """
 
 function gpu_mul!(m::SFMap{D,SB,SQ},y,x,cell_ids,dof_map,mats,wq,Z1,Z2,Z3,xi) where {D,SB,SQ}
-  num_threads = blockDim().x
   cell = threadIdx().x
   #@cuprintln(num_threads, ", ", cell)
 
@@ -93,7 +92,11 @@ function gpu_mul!(m::SFMap{D,SB,SQ},y,x,cell_ids,dof_map,mats,wq,Z1,Z2,Z3,xi) wh
   ids = view(cell_ids.data,cell_ids.ptrs[cell]:cell_ids.ptrs[cell+1]-1)
   for (i,id) in enumerate(ids)
     xi_idx = 4*(cell-1) + i
-    (id > 0) ? (xi[xi_idx] = x[id]) : (xi[xi_idx] = 0.0)
+    if id > 0
+      xi[xi_idx] = x[id]
+    else
+      xi[xi_idx] = 0.0
+    end
   end
 
   # B) Could we move this to registers using StaticArrays?
@@ -104,20 +107,23 @@ function gpu_mul!(m::SFMap{D,SB,SQ},y,x,cell_ids,dof_map,mats,wq,Z1,Z2,Z3,xi) wh
     Z1[z1_idx] = xi[xi_idx]
   end
 
-  for r in 1:D, i1 in 1:SQ[1], j1 in 1:SB[1], j2 in 1:SB[2]
-    z1_idx = (cell-1)*SB[2]*SB[1]*D + (j2-1)*SB[1]*D + (j1-1)*D + r
+  for r in 1:D, i1 in 1:SQ[1], j2 in 1:SB[2]
     z2_idx = (cell-1)*SB[2]*SQ[1]*D + (j2-1)*SQ[1]*D + (i1-1)*D + r
-    Z2[z2_idx] += mats[1,r,i1,j1] * Z1[z1_idx]
+    Z2[z2_idx] = 0.0
+    for j1 in 1:SB[1]
+      z1_idx = (cell-1)*SB[2]*SB[1]*D + (j2-1)*SB[1]*D + (j1-1)*D + r
+      Z2[z2_idx] += mats[1,r,i1,j1] * Z1[z1_idx]
+    end
   end
 
-  for r in 1:D, i1 in 1:SQ[1], i2 in 1:SQ[2], j2 in 1:SB[2]
-    z2_idx = (cell-1)*SB[2]*SQ[1]*D + (j2-1)*SQ[1]*D + (i1-1)*D + r
+  for r in 1:D, i1 in 1:SQ[1], i2 in 1:SQ[2]
     z3_idx = (cell-1)*SQ[2]*SQ[1]*D + (i2-1)*SQ[1]*D + (i1-1)*D + r
-    Z3[z3_idx] += mats[2,r,i2,j2] * Z2[z2_idx]
+    Z3[z3_idx] = 0.0
+    for j2 in 1:SB[2]
+      z2_idx = (cell-1)*SB[2]*SQ[1]*D + (j2-1)*SQ[1]*D + (i1-1)*D + r
+      Z3[z3_idx] += mats[2,r,i2,j2] * Z2[z2_idx]
+    end
   end
-
-  fill!(Z1,0.0)
-  fill!(Z2,0.0)
 
   for r in 1:D, i1 in 1:SQ[1], i2 in 1:SQ[2]
     idx    = (i2-1)*SQ[1] + i1
@@ -125,16 +131,22 @@ function gpu_mul!(m::SFMap{D,SB,SQ},y,x,cell_ids,dof_map,mats,wq,Z1,Z2,Z3,xi) wh
     Z3[z3_idx] *= wq[idx]
   end
 
-  for r in 1:D, i1 in 1:SQ[1], i2 in 1:SQ[2], j2 in 1:SB[2]
+  for r in 1:D, i1 in 1:SQ[1], j2 in 1:SB[2]
     z2_idx = (cell-1)*SB[2]*SQ[1]*D + (j2-1)*SQ[1]*D + (i1-1)*D + r
-    z3_idx = (cell-1)*SQ[2]*SQ[1]*D + (i2-1)*SQ[1]*D + (i1-1)*D + r
-    Z2[z2_idx] += mats[2,r,i2,j2] * Z3[z3_idx]
+    Z2[z2_idx] = 0.0
+    for i2 in 1:SQ[2]
+      z3_idx = (cell-1)*SQ[2]*SQ[1]*D + (i2-1)*SQ[1]*D + (i1-1)*D + r
+      Z2[z2_idx] += mats[2,r,i2,j2] * Z3[z3_idx]
+    end
   end
 
-  for r in 1:D, i1 in 1:SQ[1], j1 in 1:SB[1], j2 in 1:SB[2]
+  for r in 1:D, j1 in 1:SB[1], j2 in 1:SB[2]
     z1_idx = (cell-1)*SB[2]*SB[1]*D + (j2-1)*SB[1]*D + (j1-1)*D + r
-    z2_idx = (cell-1)*SB[2]*SQ[1]*D + (j2-1)*SQ[1]*D + (i1-1)*D + r
-    Z1[z1_idx] += mats[1,r,i1,j1] * Z2[z2_idx]
+    Z1[z1_idx] = 0.0
+    for i1 in 1:SQ[1]
+      z2_idx = (cell-1)*SB[2]*SQ[1]*D + (j2-1)*SQ[1]*D + (i1-1)*D + r
+      Z1[z1_idx] += mats[1,r,i1,j1] * Z2[z2_idx]
+    end
   end
 
   for (i,I) in enumerate(dof_map)
@@ -147,18 +159,19 @@ function gpu_mul!(m::SFMap{D,SB,SQ},y,x,cell_ids,dof_map,mats,wq,Z1,Z2,Z3,xi) wh
     end
   end
 
-  fill!(y,0.0)
-  sync_threads()
   for (i,id) in enumerate(ids)
     xi_idx = 4*(cell-1) + i
-    (id > 0) && (y[id] += xi[xi_idx])
+    if id > 0
+      CUDA.@atomic y[id] += xi[xi_idx]
+    end
   end
 
   return
 end
 
 
-x = CuArray(ones(size(b)))
+x_ref = randn(size(b))
+x = CuArray(x_ref)
 y = CuArray(zeros(size(b)))
 @cuda threads=nt gpu_mul!(gpu_m,
                y,
@@ -172,7 +185,21 @@ y = CuArray(zeros(size(b)))
 cpu_y = Array(y)
 
 y_ref = zeros(length(b))
-x_ref = ones(length(b))
 mul!(y_ref,A_lazy,x_ref)
 
 cpu_y ≈ y_ref
+
+"""
+function gpu_mul!()
+  idx = (blockIdx().x-1)*blockDim().x + threadIdx().x
+  for color in 1:num_colors
+    while idx <= length(cells_per_color[color])
+      cell = cells_per_color[color][idx]
+      do_stuff
+      assemble
+      idx = idx + num_threads*num_blocks
+    end
+    sync_threads()
+  end
+end
+"""

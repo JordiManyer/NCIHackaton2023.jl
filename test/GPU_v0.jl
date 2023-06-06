@@ -28,7 +28,7 @@ model     = CartesianDiscreteModel(domain,partition)
 Ω  = Triangulation(model)
 dΩ = Measure(Ω,quad_orders[1])
 
-g(x)  = sum(x) 
+g(x)  = 0.0 
 reffe = ReferenceFE(lagrangian,Float64,fe_orders)
 V = FESpace(Ω,reffe;dirichlet_tags=["boundary"])
 U = TrialFESpace(V,g)
@@ -62,6 +62,7 @@ gpu_wq  = CuArray(cell_wq.value)
 gpu_jq  = CuArray(cell_jq.value)
 gpu_djq = CuArray(cell_djq.value)
 
+dof_map = m.dof_map
 gpu_dof_map = CuArray(m.dof_map)
 
 mats = zeros((2,2,3,2))
@@ -88,7 +89,7 @@ function gpu_mul!(m::SFMap{D,SB,SQ},y,x,cell_ids,dof_map,mats,wq) where {D,SB,SQ
 
   # A) Select cell values from input array
   xi  = CuStaticSharedArray(Float64,64) # num_threads*SB[1]*SB[2]
-  ids = view(cell_ids.data,cell_ids.ptrs[cell]:cell_ids.ptrs[cell]+1)
+  ids = view(cell_ids.data,cell_ids.ptrs[cell]:cell_ids.ptrs[cell+1]-1)
   for (i,id) in enumerate(ids)
     xi_idx = 4*(cell-1) + i
     (id > 0) ? (xi[xi_idx] = x[id]) : (xi[xi_idx] = 0.0)
@@ -127,35 +128,39 @@ function gpu_mul!(m::SFMap{D,SB,SQ},y,x,cell_ids,dof_map,mats,wq) where {D,SB,SQ
     Z3[z3_idx] += mats[2,r,i2,j2] * Z2[z2_idx]
   end
 
+  fill!(Z1,0.0)
+  fill!(Z2,0.0)
+
   for r in 1:D, i1 in 1:SQ[1], i2 in 1:SQ[2]
     idx    = (i2-1)*SQ[1] + i1
     z3_idx = (cell-1)*SQ[2]*SQ[1]*D + (i2-1)*SQ[1]*D + (i1-1)*D + r
     Z3[z3_idx] *= wq[idx]
   end
 
-  fill!(Z2,0.0)
   for r in 1:D, i1 in 1:SQ[1], i2 in 1:SQ[2], j2 in 1:SB[2]
     z2_idx = (cell-1)*SB[2]*SQ[1]*D + (j2-1)*SQ[1]*D + (i1-1)*D + r
     z3_idx = (cell-1)*SQ[2]*SQ[1]*D + (i2-1)*SQ[1]*D + (i1-1)*D + r
     Z2[z2_idx] += mats[2,r,i2,j2] * Z3[z3_idx]
   end
 
-  fill!(Z1,0.0)
   for r in 1:D, i1 in 1:SQ[1], j1 in 1:SB[1], j2 in 1:SB[2]
     z1_idx = (cell-1)*SB[2]*SB[1]*D + (j2-1)*SB[1]*D + (j1-1)*D + r
     z2_idx = (cell-1)*SB[2]*SQ[1]*D + (j2-1)*SQ[1]*D + (i1-1)*D + r
     Z1[z1_idx] += mats[1,r,i1,j1] * Z2[z2_idx]
   end
 
-  fill!(xi,0.0)
-  for r in 1:D, (i,I) in enumerate(dof_map)
+  for (i,I) in enumerate(dof_map)
     j1 = I[1]; j2 = I[2];
     xi_idx = 4*(cell-1) + i
-    z1_idx = (cell-1)*SB[2]*SB[1]*D + (j2-1)*SB[1]*D + (j1-1)*D + r
-    xi[xi_idx] += Z1[z1_idx]
+    xi[xi_idx] = 0.0
+    for r in 1:D
+      z1_idx = (cell-1)*SB[2]*SB[1]*D + (j2-1)*SB[1]*D + (j1-1)*D + r
+      xi[xi_idx] += Z1[z1_idx]
+    end
   end
 
   fill!(y,0.0)
+  sync_threads()
   for (i,id) in enumerate(ids)
     xi_idx = 4*(cell-1) + i
     (id > 0) && (y[id] += xi[xi_idx])
@@ -177,4 +182,9 @@ nt = num_cells(Ω)
                gpu_wq);
 
 cpu_y = Array(y)
-y_ref = A*ones(length(b))
+
+y_ref = zeros(length(b))
+x_ref = ones(length(b))
+mul!(y_ref,A_lazy,x_ref)
+
+cpu_y ≈ y_ref

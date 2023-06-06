@@ -75,7 +75,6 @@ end
 gpu_mats = CuArray(mats)
 
 # Caches
-gpu_xi = CuArray(zeros(nt*prod(SB)))
 gpu_Zk = [CuArray(zeros(nt*D*prod(SQ[1:d-1])*prod(SB[d:D]))) for d in 1:D+1]
 
 """
@@ -85,31 +84,28 @@ gpu_Zk = [CuArray(zeros(nt*D*prod(SQ[1:d-1])*prod(SB[d:D]))) for d in 1:D+1]
 3 - start profiling the v0
 """
 
-function gpu_mul!(m::SFMap{D,SB,SQ},nCells,y,x,cell_ids,dof_map,mats,wq,Z1,Z2,Z3,xi) where {D,SB,SQ}
+function gpu_mul!(m::SFMap{D,SB,SQ},nCells,y,x,cell_ids,dof_map,mats,wq,Z1,Z2,Z3) where {D,SB,SQ}
   thread = threadIdx().x
 
   cell = thread
   while cell <= nCells
 
-    # A) Select cell values from input array
+    # Scatter
     ids = view(cell_ids.data,cell_ids.ptrs[cell]:cell_ids.ptrs[cell+1]-1)
-    for (i,id) in enumerate(ids)
-      xi_idx = 4*(thread-1) + i
-      if id > 0
-        xi[xi_idx] = x[id]
-      else
-        xi[xi_idx] = 0.0
+    for (i,I) in enumerate(dof_map)
+      j1 = I[1]; j2 = I[2];
+      id = ids[i]
+      for r in 1:D
+        z1_idx = (thread-1)*SB[2]*SB[1]*D + (j2-1)*SB[1]*D + (j1-1)*D + r
+        if id > 0
+          Z1[z1_idx] = x[id]
+        else
+          Z1[z1_idx] = 0.0
+        end
       end
     end
 
-    # B) Could we move this to registers using StaticArrays?
-    for r in 1:D, (i,I) in enumerate(dof_map)
-      j1 = I[1]; j2 = I[2];
-      xi_idx = 4*(thread-1) + i
-      z1_idx = (thread-1)*SB[2]*SB[1]*D + (j2-1)*SB[1]*D + (j1-1)*D + r
-      Z1[z1_idx] = xi[xi_idx]
-    end
-
+    # Forward pass
     for r in 1:D, i1 in 1:SQ[1], j2 in 1:SB[2]
       z2_idx = (thread-1)*SB[2]*SQ[1]*D + (j2-1)*SQ[1]*D + (i1-1)*D + r
       Z2[z2_idx] = 0.0
@@ -128,12 +124,14 @@ function gpu_mul!(m::SFMap{D,SB,SQ},nCells,y,x,cell_ids,dof_map,mats,wq,Z1,Z2,Z3
       end
     end
 
+    # Apply weights 
     for r in 1:D, i1 in 1:SQ[1], i2 in 1:SQ[2]
       idx    = (i2-1)*SQ[1] + i1
       z3_idx = (thread-1)*SQ[2]*SQ[1]*D + (i2-1)*SQ[1]*D + (i1-1)*D + r
       Z3[z3_idx] *= wq[idx]
     end
 
+    # Backward pass
     for r in 1:D, i1 in 1:SQ[1], j2 in 1:SB[2]
       z2_idx = (thread-1)*SB[2]*SQ[1]*D + (j2-1)*SQ[1]*D + (i1-1)*D + r
       Z2[z2_idx] = 0.0
@@ -152,20 +150,17 @@ function gpu_mul!(m::SFMap{D,SB,SQ},nCells,y,x,cell_ids,dof_map,mats,wq,Z1,Z2,Z3
       end
     end
 
+    # Assemble
     for (i,I) in enumerate(dof_map)
       j1 = I[1]; j2 = I[2];
-      xi_idx = 4*(thread-1) + i
-      xi[xi_idx] = 0.0
+      id = ids[i]
+      val = 0.0
       for r in 1:D
         z1_idx = (thread-1)*SB[2]*SB[1]*D + (j2-1)*SB[1]*D + (j1-1)*D + r
-        xi[xi_idx] += Z1[z1_idx]
+        val += Z1[z1_idx]
       end
-    end
-
-    for (i,id) in enumerate(ids)
-      xi_idx = 4*(thread-1) + i
       if id > 0
-        CUDA.@atomic y[id] += xi[xi_idx]
+        CUDA.@atomic y[id] += val
       end
     end
 
@@ -186,7 +181,7 @@ y = CuArray(zeros(size(b)))
                gpu_dof_map,
                gpu_mats,
                gpu_wq,
-               gpu_Zk[1],gpu_Zk[2],gpu_Zk[3],gpu_xi);
+               gpu_Zk[1],gpu_Zk[2],gpu_Zk[3]);
 
 cpu_y = Array(y)
 

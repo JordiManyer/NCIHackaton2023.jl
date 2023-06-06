@@ -67,9 +67,9 @@ gpu_djq = CuArray(cell_djq.value)
 dof_map = m.dof_map
 gpu_dof_map = CuArray(m.dof_map)
 
-mats = zeros((2,2,3,2))
+mats = zeros((3,2,D,D))
 for r in 1:D, k in 1:D
-  mats[r,k,:,:] = m.mats[2][r,k]
+  mats[:,:,r,k] = m.mats[2][r,k]
 end
 gpu_mats = CuArray(mats)
 
@@ -112,7 +112,7 @@ function gpu_mul!(m::SFMap{D,SB,SQ},y,x,cell_ids,dof_map,mats,wq,Z1,Z2,Z3,xi) wh
     Z2[z2_idx] = 0.0
     for j1 in 1:SB[1]
       z1_idx = (cell-1)*SB[2]*SB[1]*D + (j2-1)*SB[1]*D + (j1-1)*D + r
-      Z2[z2_idx] += mats[1,r,i1,j1] * Z1[z1_idx]
+      Z2[z2_idx] += mats[i1,j1,1,r] * Z1[z1_idx]
     end
   end
 
@@ -121,7 +121,7 @@ function gpu_mul!(m::SFMap{D,SB,SQ},y,x,cell_ids,dof_map,mats,wq,Z1,Z2,Z3,xi) wh
     Z3[z3_idx] = 0.0
     for j2 in 1:SB[2]
       z2_idx = (cell-1)*SB[2]*SQ[1]*D + (j2-1)*SQ[1]*D + (i1-1)*D + r
-      Z3[z3_idx] += mats[2,r,i2,j2] * Z2[z2_idx]
+      Z3[z3_idx] += mats[i2,j2,2,r] * Z2[z2_idx]
     end
   end
 
@@ -136,7 +136,7 @@ function gpu_mul!(m::SFMap{D,SB,SQ},y,x,cell_ids,dof_map,mats,wq,Z1,Z2,Z3,xi) wh
     Z2[z2_idx] = 0.0
     for i2 in 1:SQ[2]
       z3_idx = (cell-1)*SQ[2]*SQ[1]*D + (i2-1)*SQ[1]*D + (i1-1)*D + r
-      Z2[z2_idx] += mats[2,r,i2,j2] * Z3[z3_idx]
+      Z2[z2_idx] += mats[i2,j2,2,r] * Z3[z3_idx]
     end
   end
 
@@ -145,7 +145,7 @@ function gpu_mul!(m::SFMap{D,SB,SQ},y,x,cell_ids,dof_map,mats,wq,Z1,Z2,Z3,xi) wh
     Z1[z1_idx] = 0.0
     for i1 in 1:SQ[1]
       z2_idx = (cell-1)*SB[2]*SQ[1]*D + (j2-1)*SQ[1]*D + (i1-1)*D + r
-      Z1[z1_idx] += mats[1,r,i1,j1] * Z2[z2_idx]
+      Z1[z1_idx] += mats[i1,j1,1,r] * Z2[z2_idx]
     end
   end
 

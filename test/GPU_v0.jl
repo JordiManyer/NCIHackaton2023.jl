@@ -20,7 +20,7 @@ fe_orders   = Tuple(fill(1,D))    # FE element orders
 quad_orders = Tuple(fill(4,D))    # Quadrature orders 
 
 # Setup
-n = 64
+n = 512
 domain    = repeat([0,1],D)
 partition = fill(n,D)
 model     = CartesianDiscreteModel(domain,partition)
@@ -47,8 +47,8 @@ A_lazy = LazyMatrix(m,U,V,dΩ)
 ############################################################################################
 # GPU implementation
 nCells = num_cells(Ω)
-nt = 64
-nb = 4
+nt = 256
+nb = 8
 
 SQ = (3,3)
 SB = (2,2)

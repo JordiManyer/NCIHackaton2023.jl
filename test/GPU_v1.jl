@@ -1,7 +1,6 @@
 """
-  SUMFAC-GPU v1
-  Changes from v0: xi & Zk are loaded from shared memory. However, it's not going to fit 
-  when we augment the number of threads. 
+  SUMFAC-GPU v0
+  Basic kernel. In this version, everything comes from global memory. 
 """
 
 using Test
@@ -21,7 +20,7 @@ fe_orders   = Tuple(fill(1,D))    # FE element orders
 quad_orders = Tuple(fill(4,D))    # Quadrature orders 
 
 # Setup
-n = 4
+n = 512
 domain    = repeat([0,1],D)
 partition = fill(n,D)
 model     = CartesianDiscreteModel(domain,partition)
@@ -47,9 +46,13 @@ A_lazy = LazyMatrix(m,U,V,dΩ)
 ############################################################################################
 ############################################################################################
 # GPU implementation
+nCells = num_cells(Ω)
+nt = 256
+nb = 8
 
 SQ = (3,3)
 SB = (2,2)
+
 struct SFMap{D,SB,SQ} end
 Adapt.adapt_structure(to, m::SFMap{D,SB,SQ}) where {D,SB,SQ} = SFMap{D,SB,SQ}()
 gpu_m = SFMap{D,SB,SQ}()
@@ -66,15 +69,14 @@ gpu_djq = CuArray(cell_djq.value)
 dof_map = m.dof_map
 gpu_dof_map = CuArray(m.dof_map)
 
-mats = zeros((2,2,3,2))
+mats = zeros((3,2,D,D))
 for r in 1:D, k in 1:D
-  mats[r,k,:,:] = m.mats[2][r,k]
+  mats[:,:,r,k] = m.mats[2][r,k]
 end
 gpu_mats = CuArray(mats)
 
 # Caches
-gpu_xi = CuArray(zeros(prod(SB)))
-gpu_Zk = [CuArray(zeros(D,SQ[1:d-1]...,SB[d:D]...)) for d in 1:D+1]
+gpu_Zk = [CuArray(zeros(nb*nt*D*prod(SQ[1:d-1])*prod(SB[d:D]))) for d in 1:D+1]
 
 """
 # TODO: 
@@ -83,109 +85,124 @@ gpu_Zk = [CuArray(zeros(D,SQ[1:d-1]...,SB[d:D]...)) for d in 1:D+1]
 3 - start profiling the v0
 """
 
-function gpu_mul!(m::SFMap{D,SB,SQ},y,x,cell_ids,dof_map,mats,wq) where {D,SB,SQ}
-  num_threads = blockDim().x
-  cell = threadIdx().x
-  #@cuprintln(num_threads, ", ", cell)
+function gpu_mul!(m::SFMap{D,SB,SQ},nCells,y,x,cell_ids,dof_map,mats,wq,Zk...) where {D,SB,SQ}
+  thread = (blockIdx().x-1) * blockDim().x + threadIdx().x
+  Z1,Z2,Z3 = Zk...
 
-  # A) Select cell values from input array
-  xi  = CuStaticSharedArray(Float64,64) # num_threads*SB[1]*SB[2]
-  ids = view(cell_ids.data,cell_ids.ptrs[cell]:cell_ids.ptrs[cell+1]-1)
-  for (i,id) in enumerate(ids)
-    xi_idx = 4*(cell-1) + i
-    (id > 0) ? (xi[xi_idx] = x[id]) : (xi[xi_idx] = 0.0)
-  end
+  cell = thread
+  while cell <= nCells
 
-  # B) Could we move this to registers using StaticArrays?
-  Z1 = CuStaticSharedArray(Float64,128) # num_threads*D*SB[1]*SB[2]
-  Z2 = CuStaticSharedArray(Float64,192) # num_threads*D*SQ[1]*SB[2]
-  Z3 = CuStaticSharedArray(Float64,288) # num_threads*D*SQ[1]*SQ[2]
-
-  for r in 1:D, (i,I) in enumerate(dof_map)
-    j1 = I[1]; j2 = I[2];
-    xi_idx = 4*(cell-1) + i
-    z1_idx = (cell-1)*SB[2]*SB[1]*D + (j2-1)*SB[1]*D + (j1-1)*D + r
-    Z1[z1_idx] = xi[xi_idx]
-  end
-
-  """ TODO
-  for (i,I) in enumerate(dof_map)
-    val = (id > 0) ? (xi[xi_idx] = x[id]) : (xi[xi_idx] = 0.0)
-    for r in 1:D
-      Z1[z1_idx] = val
+    # Scatter
+    ids = view(cell_ids.data,cell_ids.ptrs[cell]:cell_ids.ptrs[cell+1]-1)
+    for (i,I) in enumerate(dof_map)
+      j1 = I[1]; j2 = I[2];
+      id = ids[i]
+      for r in 1:D
+        z1_idx = (thread-1)*SB[2]*SB[1]*D + (j2-1)*SB[1]*D + (j1-1)*D + r
+        if id > 0
+          Z1[z1_idx] = x[id]
+        else
+          Z1[z1_idx] = 0.0
+        end
+      end
     end
-  end
-  """
 
-  for r in 1:D, i1 in 1:SQ[1], j1 in 1:SB[1], j2 in 1:SB[2]
-    z1_idx = (cell-1)*SB[2]*SB[1]*D + (j2-1)*SB[1]*D + (j1-1)*D + r
-    z2_idx = (cell-1)*SB[2]*SQ[1]*D + (j2-1)*SQ[1]*D + (i1-1)*D + r
-    Z2[z2_idx] += mats[1,r,i1,j1] * Z1[z1_idx]
-  end
-
-  for r in 1:D, i1 in 1:SQ[1], i2 in 1:SQ[2], j2 in 1:SB[2]
-    z2_idx = (cell-1)*SB[2]*SQ[1]*D + (j2-1)*SQ[1]*D + (i1-1)*D + r
-    z3_idx = (cell-1)*SQ[2]*SQ[1]*D + (i2-1)*SQ[1]*D + (i1-1)*D + r
-    Z3[z3_idx] += mats[2,r,i2,j2] * Z2[z2_idx]
-  end
-
-  fill!(Z1,0.0)
-  fill!(Z2,0.0)
-
-  for r in 1:D, i1 in 1:SQ[1], i2 in 1:SQ[2]
-    idx    = (i2-1)*SQ[1] + i1
-    z3_idx = (cell-1)*SQ[2]*SQ[1]*D + (i2-1)*SQ[1]*D + (i1-1)*D + r
-    Z3[z3_idx] *= wq[idx]
-  end
-
-  for r in 1:D, i1 in 1:SQ[1], i2 in 1:SQ[2], j2 in 1:SB[2]
-    z2_idx = (cell-1)*SB[2]*SQ[1]*D + (j2-1)*SQ[1]*D + (i1-1)*D + r
-    z3_idx = (cell-1)*SQ[2]*SQ[1]*D + (i2-1)*SQ[1]*D + (i1-1)*D + r
-    Z2[z2_idx] += mats[2,r,i2,j2] * Z3[z3_idx]
-  end
-
-  for r in 1:D, i1 in 1:SQ[1], j1 in 1:SB[1], j2 in 1:SB[2]
-    z1_idx = (cell-1)*SB[2]*SB[1]*D + (j2-1)*SB[1]*D + (j1-1)*D + r
-    z2_idx = (cell-1)*SB[2]*SQ[1]*D + (j2-1)*SQ[1]*D + (i1-1)*D + r
-    Z1[z1_idx] += mats[1,r,i1,j1] * Z2[z2_idx]
-  end
-
-  for (i,I) in enumerate(dof_map)
-    j1 = I[1]; j2 = I[2];
-    xi_idx = 4*(cell-1) + i
-    xi[xi_idx] = 0.0
-    for r in 1:D
-      z1_idx = (cell-1)*SB[2]*SB[1]*D + (j2-1)*SB[1]*D + (j1-1)*D + r
-      xi[xi_idx] += Z1[z1_idx]
+    # Forward pass
+    for r in 1:D, i1 in 1:SQ[1], j2 in 1:SB[2]
+      z2_idx = (thread-1)*SB[2]*SQ[1]*D + (j2-1)*SQ[1]*D + (i1-1)*D + r
+      Z2[z2_idx] = 0.0
+      for j1 in 1:SB[1]
+        z1_idx = (thread-1)*SB[2]*SB[1]*D + (j2-1)*SB[1]*D + (j1-1)*D + r
+        Z2[z2_idx] += mats[i1,j1,1,r] * Z1[z1_idx]
+      end
     end
-  end
 
-  fill!(y,0.0)
-  sync_threads()
-  for (i,id) in enumerate(ids)
-    xi_idx = 4*(cell-1) + i
-    (id > 0) && (y[id] += xi[xi_idx])
+    for r in 1:D, i1 in 1:SQ[1], i2 in 1:SQ[2]
+      z3_idx = (thread-1)*SQ[2]*SQ[1]*D + (i2-1)*SQ[1]*D + (i1-1)*D + r
+      Z3[z3_idx] = 0.0
+      for j2 in 1:SB[2]
+        z2_idx = (thread-1)*SB[2]*SQ[1]*D + (j2-1)*SQ[1]*D + (i1-1)*D + r
+        Z3[z3_idx] += mats[i2,j2,2,r] * Z2[z2_idx]
+      end
+    end
+
+    # Apply weights 
+    for r in 1:D, i1 in 1:SQ[1], i2 in 1:SQ[2]
+      idx    = (i2-1)*SQ[1] + i1
+      z3_idx = (thread-1)*SQ[2]*SQ[1]*D + (i2-1)*SQ[1]*D + (i1-1)*D + r
+      Z3[z3_idx] *= wq[idx]
+    end
+
+    # Backward pass
+    for r in 1:D, i1 in 1:SQ[1], j2 in 1:SB[2]
+      z2_idx = (thread-1)*SB[2]*SQ[1]*D + (j2-1)*SQ[1]*D + (i1-1)*D + r
+      Z2[z2_idx] = 0.0
+      for i2 in 1:SQ[2]
+        z3_idx = (thread-1)*SQ[2]*SQ[1]*D + (i2-1)*SQ[1]*D + (i1-1)*D + r
+        Z2[z2_idx] += mats[i2,j2,2,r] * Z3[z3_idx]
+      end
+    end
+
+    for r in 1:D, j1 in 1:SB[1], j2 in 1:SB[2]
+      z1_idx = (thread-1)*SB[2]*SB[1]*D + (j2-1)*SB[1]*D + (j1-1)*D + r
+      Z1[z1_idx] = 0.0
+      for i1 in 1:SQ[1]
+        z2_idx = (thread-1)*SB[2]*SQ[1]*D + (j2-1)*SQ[1]*D + (i1-1)*D + r
+        Z1[z1_idx] += mats[i1,j1,1,r] * Z2[z2_idx]
+      end
+    end
+
+    # Assemble
+    for (i,I) in enumerate(dof_map)
+      j1 = I[1]; j2 = I[2];
+      id = ids[i]
+      val = 0.0
+      for r in 1:D
+        z1_idx = (thread-1)*SB[2]*SB[1]*D + (j2-1)*SB[1]*D + (j1-1)*D + r
+        val += Z1[z1_idx]
+      end
+      if id > 0
+        CUDA.@atomic y[id] += val
+      end
+    end
+
+    cell += gridDim().x * blockDim().x
   end
 
   return
 end
 
 
-x = CuArray(ones(size(b)))
+x_ref = randn(size(b))
+x = CuArray(x_ref)
 y = CuArray(zeros(size(b)))
-nt = num_cells(Ω)
-@cuda threads=nt gpu_mul!(gpu_m,
+@cuda blocks=nb threads=nt gpu_mul!(gpu_m,nCells,
                y,
                x,
                gpu_cell_dof_ids,
                gpu_dof_map,
                gpu_mats,
-               gpu_wq);
+               gpu_wq,
+               gpu_Zk...);
 
 cpu_y = Array(y)
 
 y_ref = zeros(length(b))
-x_ref = ones(length(b))
 mul!(y_ref,A_lazy,x_ref)
 
 cpu_y ≈ y_ref
+
+"""
+function gpu_mul!()
+  idx = (blockIdx().x-1)*blockDim().x + threadIdx().x
+  for color in 1:num_colors
+    while idx <= length(cells_per_color[color])
+      cell = cells_per_color[color][idx]
+      do_stuff
+      assemble
+      idx = idx + num_threads*num_blocks
+    end
+    sync_threads()
+  end
+end
+"""

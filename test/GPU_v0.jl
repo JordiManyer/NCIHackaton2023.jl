@@ -74,6 +74,13 @@ gpu_mats = CuArray(mats)
 gpu_xi = CuArray(zeros(prod(SB)))
 gpu_Zk = [CuArray(zeros(D,SQ[1:d-1]...,SB[d:D]...)) for d in 1:D+1]
 
+"""
+# TODO: 
+1 - Check if we can use StaticArrays for Zk, check if we can fit it in shared mem/registers
+2 - permute mat dims so that first indexes are the ones that change the most
+3 - start profiling the v0
+"""
+
 function gpu_mul!(m::SFMap{D,SB,SQ},y,x,cell_ids,dof_map,mats,wq) where {D,SB,SQ}
   num_threads = blockDim().x
   cell = threadIdx().x
@@ -87,7 +94,7 @@ function gpu_mul!(m::SFMap{D,SB,SQ},y,x,cell_ids,dof_map,mats,wq) where {D,SB,SQ
     (id > 0) ? (xi[xi_idx] = x[id]) : (xi[xi_idx] = 0.0)
   end
 
-  # B)
+  # B) Could we move this to registers using StaticArrays?
   Z1 = CuStaticSharedArray(Float64,128) # num_threads*D*SB[1]*SB[2]
   Z2 = CuStaticSharedArray(Float64,192) # num_threads*D*SQ[1]*SB[2]
   Z3 = CuStaticSharedArray(Float64,288) # num_threads*D*SQ[1]*SQ[2]
@@ -98,6 +105,15 @@ function gpu_mul!(m::SFMap{D,SB,SQ},y,x,cell_ids,dof_map,mats,wq) where {D,SB,SQ
     z1_idx = (cell-1)*SB[2]*SB[1]*D + (j2-1)*SB[1]*D + (j1-1)*D + r
     Z1[z1_idx] = xi[xi_idx]
   end
+
+  """ TODO
+  for (i,I) in enumerate(dof_map)
+    val = (id > 0) ? (xi[xi_idx] = x[id]) : (xi[xi_idx] = 0.0)
+    for r in 1:D
+      Z1[z1_idx] = val
+    end
+  end
+  """
 
   for r in 1:D, i1 in 1:SQ[1], j1 in 1:SB[1], j2 in 1:SB[2]
     z1_idx = (cell-1)*SB[2]*SB[1]*D + (j2-1)*SB[1]*D + (j1-1)*D + r

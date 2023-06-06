@@ -48,6 +48,7 @@ A_lazy = LazyMatrix(m,U,V,dΩ)
 # GPU implementation
 nCells = num_cells(Ω)
 nt = 32
+nb = 2
 
 SQ = (3,3)
 SB = (2,2)
@@ -75,7 +76,7 @@ end
 gpu_mats = CuArray(mats)
 
 # Caches
-gpu_Zk = [CuArray(zeros(nt*D*prod(SQ[1:d-1])*prod(SB[d:D]))) for d in 1:D+1]
+gpu_Zk = [CuArray(zeros(nb*nt*D*prod(SQ[1:d-1])*prod(SB[d:D]))) for d in 1:D+1]
 
 """
 # TODO: 
@@ -85,7 +86,7 @@ gpu_Zk = [CuArray(zeros(nt*D*prod(SQ[1:d-1])*prod(SB[d:D]))) for d in 1:D+1]
 """
 
 function gpu_mul!(m::SFMap{D,SB,SQ},nCells,y,x,cell_ids,dof_map,mats,wq,Z1,Z2,Z3) where {D,SB,SQ}
-  thread = threadIdx().x
+  thread = (blockIdx().x-1) * blockDim().x + threadIdx().x
 
   cell = thread
   while cell <= nCells
@@ -174,7 +175,7 @@ end
 x_ref = randn(size(b))
 x = CuArray(x_ref)
 y = CuArray(zeros(size(b)))
-@cuda threads=nt gpu_mul!(gpu_m,nCells,
+@cuda blocks=nb threads=nt gpu_mul!(gpu_m,nCells,
                y,
                x,
                gpu_cell_dof_ids,

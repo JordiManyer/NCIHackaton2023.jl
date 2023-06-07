@@ -12,6 +12,7 @@ using Gridap.Arrays
 
 using CUDA
 using Adapt
+using NVTX
 using NCIHackaton2023
 
 # Parameters
@@ -190,6 +191,20 @@ y_ref = zeros(length(b))
 mul!(y_ref,A_lazy,x_ref)
 
 cpu_y ≈ y_ref
+
+
+NVTX.@range begin
+  CUDA.@profile begin
+    @cuda blocks=nb threads=nt gpu_mul!(gpu_m,nCells,
+                y,
+                x,
+                gpu_cell_dof_ids,
+                gpu_dof_map,
+                gpu_mats,
+                gpu_wq,
+                gpu_Zk[1],gpu_Zk[2],gpu_Zk[3]);
+  end
+end
 
 """
 function gpu_mul!()

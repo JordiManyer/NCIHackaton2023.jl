@@ -15,7 +15,7 @@ using Adapt
 using NCIHackaton2023
 
 macro split_index3(idx,D1,D2,D3)
-  return :(($idx-1) % $D1 + 1, (($idx-1) ÷ $D1) % $D2 + 1, ($idx-1) ÷ ($D1*$D2) + 1)
+  return esc(:(($idx-1) % $D1 + 1, (($idx-1) ÷ $D1) % $D2 + 1, ($idx-1) ÷ ($D1*$D2) + 1))
 end
 
 # Parameters
@@ -83,8 +83,9 @@ gpu_mats = CuArray(mats)
 gpu_Zk = [CuArray(zeros(nb*nt*D*prod(SQ[1:d-1])*prod(SB[d:D]))) for d in 1:D+1]
 
 function gpu_mul!(m::SFMap{D,SB,SQ},nCells,y,x,cell_ids,dof_map,mats,wq,Zk...) where {D,SB,SQ}
-  thread = (blockIdx().x-1) * blockDim().x + threadIdx().x
-  y_step = blockDim().y
+  thread = (blockIdx().x-1) * blockDim().y + threadIdx().y
+  y_start = threadIdx().x
+  y_step = blockDim().x
   Z1,Z2,Z3 = Zk
 
   cell = thread
@@ -93,13 +94,15 @@ function gpu_mul!(m::SFMap{D,SB,SQ},nCells,y,x,cell_ids,dof_map,mats,wq,Zk...) w
     # Scatter
     ids = view(cell_ids.data,cell_ids.ptrs[cell]:cell_ids.ptrs[cell+1]-1)
 
-    idy = threadIdx().y
+    idy = y_start
     s  = D*SB[1]*SB[2]
     while idy <= s
       r, i = (idy-1)%D+1, (idy-1)÷D+1
       I  = dof_map[i]; j1 = I[1]; j2 = I[2];
       id = ids[i]
       z1_idx = (thread-1)*SB[2]*SB[1]*D + (j2-1)*SB[1]*D + (j1-1)*D + r
+
+      Z1[z1_idx] = x[max(id,1)] * (id > 0)
       if id > 0
         Z1[z1_idx] = x[id]
       else
@@ -110,10 +113,11 @@ function gpu_mul!(m::SFMap{D,SB,SQ},nCells,y,x,cell_ids,dof_map,mats,wq,Zk...) w
     CUDA.sync_threads()
 
     # Forward pass
-    idy = threadIdx().y
+    idy = y_start
     s  = D*SQ[1]*SB[2]
     while idy <= s
-      r, i1, j2 = (idy-1)%D+1, ((idy-1)÷D)%SQ[1]+1, (idy-1)÷(D*SQ[1])+1
+      #r, i1, j2 = (idy-1)%D+1, ((idy-1)÷D)%SQ[1]+1, (idy-1)÷(D*SQ[1])+1
+      r, i1, j2 = @split_index3(idy,D,SQ[1],SB[2])
 
       z2_idx = (thread-1)*SB[2]*SQ[1]*D + (j2-1)*SQ[1]*D + (i1-1)*D + r
       Z2[z2_idx] = 0.0
@@ -125,7 +129,7 @@ function gpu_mul!(m::SFMap{D,SB,SQ},nCells,y,x,cell_ids,dof_map,mats,wq,Zk...) w
     end
     CUDA.sync_threads()
 
-    idy = threadIdx().y
+    idy = y_start
     s = D*SQ[1]*SQ[2]
     while idy <= s
       r, i1, i2 = (idy-1)%D+1, ((idy-1)÷D)%SQ[1]+1, (idy-1)÷(D*SQ[1])+1
@@ -141,7 +145,7 @@ function gpu_mul!(m::SFMap{D,SB,SQ},nCells,y,x,cell_ids,dof_map,mats,wq,Zk...) w
     CUDA.sync_threads()
 
     # Apply weights 
-    idy = threadIdx().y
+    idy = y_start
     s = D*SQ[1]*SQ[2]
     while idy <= s
       r, i1, i2 = (idy-1)%D+1, ((idy-1)÷D)%SQ[1]+1, (idy-1)÷(D*SQ[1])+1
@@ -153,7 +157,7 @@ function gpu_mul!(m::SFMap{D,SB,SQ},nCells,y,x,cell_ids,dof_map,mats,wq,Zk...) w
     CUDA.sync_threads()
 
     # Backward pass
-    idy = threadIdx().y
+    idy = y_start
     s = D*SQ[1]*SB[2]
     while idy <= s
       r, i1, j2 = (idy-1)%D+1, ((idy-1)÷D)%SQ[1]+1, (idy-1)÷(D*SQ[1])+1
@@ -167,7 +171,7 @@ function gpu_mul!(m::SFMap{D,SB,SQ},nCells,y,x,cell_ids,dof_map,mats,wq,Zk...) w
     end
     CUDA.sync_threads()
 
-    idy = threadIdx().y
+    idy = y_start
     s = D*SB[1]*SB[2]
     while idy <= s
       r, j1, j2 = (idy-1)%D+1, ((idy-1)÷D)%SB[1]+1, (idy-1)÷(D*SB[1])+1
@@ -182,7 +186,7 @@ function gpu_mul!(m::SFMap{D,SB,SQ},nCells,y,x,cell_ids,dof_map,mats,wq,Zk...) w
     CUDA.sync_threads()
 
     # Assemble
-    idy = threadIdx().y
+    idy = y_start
     s  = D*SB[1]*SB[2]
     while idy <= s
       r, i = (idy-1)%D+1, (idy-1)÷D+1
@@ -196,7 +200,7 @@ function gpu_mul!(m::SFMap{D,SB,SQ},nCells,y,x,cell_ids,dof_map,mats,wq,Zk...) w
     end
     CUDA.sync_threads()
 
-    cell += gridDim().x * blockDim().x
+    cell += gridDim().x * blockDim().y
   end
 
   return
@@ -217,8 +221,8 @@ kernel = @cuda name="gpu_mul_" launch=false gpu_mul!(gpu_m,nCells,
                                                       );
 config  = launch_configuration(kernel.fun)
 
-tt = config.threads#(192,4)
-bb = config.blocks#512
+tt = (4,192)
+bb = 80
 kernel(gpu_m,nCells,y,x,gpu_cell_dof_ids,gpu_dof_map,gpu_mats,gpu_wq,gpu_Zk...;threads=tt,blocks=bb)
 
 y_ref = zeros(length(b))
@@ -232,6 +236,19 @@ CUDA.@profile begin
     CUDA.@sync kernel(gpu_m,nCells,y,x,gpu_cell_dof_ids,gpu_dof_map,gpu_mats,gpu_wq,gpu_Zk...;threads=tt,blocks=bb)
   end
 end
+
+
+function benchmark(config,args)
+  CUDA.@elapsed begin
+    for i in 1:100
+      CUDA.@sync kernel(args...;config...)
+    end
+  end
+end
+config = (threads=tt,blocks=bb)
+args = (gpu_m,nCells,y,x,gpu_cell_dof_ids,gpu_dof_map,gpu_mats,gpu_wq,gpu_Zk...)
+time = benchmark(config,args)
+
 
 """
 function gpu_mul!()

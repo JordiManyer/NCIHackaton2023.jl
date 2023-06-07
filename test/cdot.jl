@@ -20,7 +20,7 @@ function benchmark_cuda_dot(niter,x,y)
   minimum(times), sum(times)/niter, maximum(times)
 end
 
-niter = 20
+niter = 50
 sizes = [10000,100000,1000000,10000000,10000000]
 
 t1 = zeros(length(sizes))
@@ -37,4 +37,3 @@ plt = plot(xlabel="log(n)",ylabel="log(t)");
 plot!(log10.(sizes),log10.(t1),labels="cpu");
 plot!(log10.(sizes),log10.(t2),labels="gpu");
 @show plt
-

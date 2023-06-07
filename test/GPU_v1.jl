@@ -47,8 +47,8 @@ A_lazy = LazyMatrix(m,U,V,dΩ)
 ############################################################################################
 # GPU implementation
 nCells = num_cells(Ω)
-nt = 256
-nb = 8
+nt = 128
+nb = 1024
 
 SQ = (3,3)
 SB = (2,2)
@@ -87,7 +87,7 @@ gpu_Zk = [CuArray(zeros(nb*nt*D*prod(SQ[1:d-1])*prod(SB[d:D]))) for d in 1:D+1]
 
 function gpu_mul!(m::SFMap{D,SB,SQ},nCells,y,x,cell_ids,dof_map,mats,wq,Zk...) where {D,SB,SQ}
   thread = (blockIdx().x-1) * blockDim().x + threadIdx().x
-  Z1,Z2,Z3 = Zk...
+  Z1,Z2,Z3 = Zk
 
   cell = thread
   while cell <= nCells
@@ -176,21 +176,30 @@ end
 x_ref = randn(size(b))
 x = CuArray(x_ref)
 y = CuArray(zeros(size(b)))
-@cuda blocks=nb threads=nt gpu_mul!(gpu_m,nCells,
-               y,
-               x,
-               gpu_cell_dof_ids,
-               gpu_dof_map,
-               gpu_mats,
-               gpu_wq,
-               gpu_Zk...);
+kernel = @cuda name="gpu_mul!" launch=false gpu_mul!(gpu_m,nCells,
+                                                      y,
+                                                      x,
+                                                      gpu_cell_dof_ids,
+                                                      gpu_dof_map,
+                                                      gpu_mats,
+                                                      gpu_wq,
+                                                      gpu_Zk...
+                                                      );
+config  = launch_configuration(kernel.fun)
 
-cpu_y = Array(y)
+kernel(gpu_m,nCells,y,x,gpu_cell_dof_ids,gpu_dof_map,gpu_mats,gpu_wq,gpu_Zk...;config...)
 
 y_ref = zeros(length(b))
 mul!(y_ref,A_lazy,x_ref)
 
+cpu_y = Array(y)
 cpu_y ≈ y_ref
+
+CUDA.@profile begin
+  for iter in 1:10
+    CUDA.@sync kernel(gpu_m,nCells,y,x,gpu_cell_dof_ids,gpu_dof_map,gpu_mats,gpu_wq,gpu_Zk...;config...)
+  end
+end
 
 """
 function gpu_mul!()

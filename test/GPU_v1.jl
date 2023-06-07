@@ -217,8 +217,8 @@ kernel = @cuda name="gpu_mul_" launch=false gpu_mul!(gpu_m,nCells,
                                                       );
 config  = launch_configuration(kernel.fun)
 
-tt = (128,4)
-bb = 1024
+tt = config.threads#(192,4)
+bb = config.blocks#512
 kernel(gpu_m,nCells,y,x,gpu_cell_dof_ids,gpu_dof_map,gpu_mats,gpu_wq,gpu_Zk...;threads=tt,blocks=bb)
 
 y_ref = zeros(length(b))

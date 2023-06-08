@@ -71,7 +71,7 @@ kernel_args = (gpu_m, nCells, y, x, gpu_cell_dof_ids, gpu_wq, gpu_Zk...)
 kernel = @cuda name = "gpu_mul_v1" launch = false gpu_mul_v1!(kernel_args...);
 config = launch_configuration(kernel.fun)
 
-config = (threads = (4, 192), blocks = 80)
+config = (threads = (32,20), blocks = 80)
 kernel(kernel_args...; config...)
 
 y_ref = zeros(length(b))

@@ -43,6 +43,16 @@ b = get_vector(op)
 m = SumFactorizationMap(D, fe_orders, quad_orders)
 A_lazy = LazyMatrix(m, U, V, dΩ)
 
+function get_mats(m::SumFactorizationMap{D, SB, SQ}) where {D, SB, SQ}
+	mats = zeros((SB[1],D,SQ[1],D))
+	tmats = zeros((SQ[1],D,SB[1],D))
+	for r in 1:D, k in 1:D, i in SQ[1], j in SB[1]
+		mats[j,r,i,k] = m.mats[2][k,r][i,j]
+		tmats[i,r,j,k] = m.mats[2][k,r][i,j]
+	end
+	return mats, tmats
+end
+
 ############################################################################################
 ############################################################################################
 # GPU implementation
@@ -50,6 +60,7 @@ nCells = num_cells(Ω)
 
 gpu_m = to_gpu(m)
 gpu_cell_dof_ids = to_gpu(get_cell_dof_ids(U));
+mats, tmats = get_mats(m)
 
 cell_wq, cell_jq, cell_djq = A_lazy.cell_quantities
 gpu_wq = CuArray(cell_wq.value)
@@ -69,7 +80,8 @@ kernel = @cuda name = "gpu_mul_v2" launch = false gpu_mul_v2!(kernel_args...);
 config = launch_configuration(kernel.fun)
 
 mem = 16*D*(prod(SB) + SQ[1]*SB[2] + prod(SQ))*sizeof(Float64)
-kernel(kernel_args...;threads=(32,16),blocks=80,shmem=mem)
+config = (threads=(32,16),blocks=160,shmem=mem)
+kernel(kernel_args...;config...)
 
 y_ref = zeros(length(b))
 @elapsed mul!(y_ref, A_lazy, x_ref)
@@ -77,25 +89,5 @@ y_ref = zeros(length(b))
 cpu_y = Array(y)
 cpu_y ≈ y_ref
 
-############################################################################################
-
-function my_test_kernel(v)
-  Z = @cuDynamicSharedMem(Float64,blockDim().y)
-  Q = @cuDynamicSharedMem(Float64,blockDim().y)
-
-  tid = threadIdx().y
-  CUDA.@atomic Z[tid] += 1.0
-  CUDA.@atomic Q[tid] += 1.0
-
-  if threadIdx().x == 1
-    v[tid] = Z[tid] + Q[tid]
-  end
-
-  return 
-end
-
-v = CuArray(zeros(10))
-mem = sizeof(Float64)*10*2
-@cuda threads=(10,10) shmem=mem my_test_kernel(v);
-
-Array(v)
+niter = 100
+time = NCIHackaton2023.benchmark_kernel(kernel, config, kernel_args, niter)

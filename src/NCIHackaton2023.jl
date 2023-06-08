@@ -27,5 +27,6 @@ export LazyMatrix
 export to_gpu
 export gpu_mul_v0!
 export gpu_mul_v1!
+export gpu_mul_v2!
 
 end

@@ -89,3 +89,4 @@ end
 # Benchmark
 niter = 100
 time = NCIHackaton2023.benchmark_kernel(kernel, config, kernel_args, niter)
+

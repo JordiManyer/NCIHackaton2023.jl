@@ -62,22 +62,17 @@ gpu_djq = CuArray(cell_djq.value)
 D, SB, SQ = get_dimensional_parameters(m)
 gpu_Zk = [CuArray(zeros(nb * nt * D * prod(SQ[1:d-1]) * prod(SB[d:D]))) for d in 1:D+1]
 
+# Comparison CPU vs GPU
 x_ref = ones(size(b))
 x = CuArray(x_ref)
 y = CuArray(zeros(size(b)))
-kernel = @cuda name = "gpu_mul_v1" launch = false gpu_mul_v1!(
-	gpu_m, nCells,
-	y,
-	x,
-	gpu_cell_dof_ids,
-	gpu_wq,
-	gpu_Zk...,
-);
+kernel_args = (gpu_m, nCells, y, x, gpu_cell_dof_ids, gpu_wq, gpu_Zk...)
+
+kernel = @cuda name = "gpu_mul_v1" launch = false gpu_mul_v1!(kernel_args...);
 config = launch_configuration(kernel.fun)
 
-tt = (4, 192)
-bb = 80
-kernel(gpu_m, nCells, y, x, gpu_cell_dof_ids, gpu_wq, gpu_Zk...; threads = tt, blocks = bb)
+config = (threads = (4, 192), blocks = 80)
+kernel(kernel_args...; config...)
 
 y_ref = zeros(length(b))
 mul!(y_ref, A_lazy, x_ref)
@@ -85,36 +80,13 @@ mul!(y_ref, A_lazy, x_ref)
 cpu_y = Array(y)
 cpu_y ≈ y_ref
 
+# Profile
 CUDA.@profile begin
 	for iter in 1:10
-		CUDA.@sync kernel(gpu_m, nCells, y, x, gpu_cell_dof_ids, gpu_wq, gpu_Zk...; threads = tt, blocks = bb)
+		CUDA.@sync kernel(kernel_args...; config...)
 	end
 end
 
-
-function benchmark(config, args)
-	CUDA.@elapsed begin
-		for i in 1:100
-			CUDA.@sync kernel(args...; config...)
-		end
-	end
-end
-config = (threads = tt, blocks = bb)
-args = (gpu_m, nCells, y, x, gpu_cell_dof_ids, gpu_wq, gpu_Zk...)
-time = benchmark(config, args)
-
-
-"""
-function gpu_mul!()
-  idx = (blockIdx().x-1)*blockDim().x + threadIdx().x
-  for color in 1:num_colors
-	while idx <= length(cells_per_color[color])
-	  cell = cells_per_color[color][idx]
-	  do_stuff
-	  assemble
-	  idx = idx + num_threads*num_blocks
-	end
-	sync_threads()
-  end
-end
-"""
+# Benchmark
+niter = 100
+time = NCIHackaton2023.benchmark_kernel(kernel, config, kernel_args, niter)

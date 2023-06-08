@@ -13,3 +13,14 @@ Adapt.@adapt_structure Gridap.Arrays.Table
 function to_gpu(t::Gridap.Arrays.Table)
 	return Table(CuArray(t.data), CuArray(t.ptrs))
 end
+
+# Benchmark kernel 
+
+function benchmark_kernel(kernel, config, args, niter)
+	time = CUDA.@elapsed begin
+		for i in 1:niter
+			CUDA.@sync kernel(args...; config...)
+		end
+	end
+	return time / niter
+end

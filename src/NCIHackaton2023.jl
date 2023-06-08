@@ -21,7 +21,11 @@ include("LazyMatrices.jl")
 include("Utils.jl")
 include("GPUKernels.jl")
 
-export SumFactorizationMap
+export SumFactorizationMap, get_dimensional_parameters
 export LazyMatrix
+
+export to_gpu
+export gpu_mul_v0!
+export gpu_mul_v1!
 
 end

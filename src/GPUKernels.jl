@@ -359,3 +359,281 @@ function gpu_mul_v2!(m::SumFactorizationMap{D, SB, SQ}, nCells, y, x, cell_ids, 
 
 	return
 end
+
+
+
+"""
+  SUMFAC-GPU Kernel v3
+  Fourth version. Reordering of the matrices to obtain better memory access patterns.
+	 - We process blockDim().y cells at the same time.
+	 - We use blockDim().x threads to process each cell.
+"""
+function gpu_mul_v3!(m::SumFactorizationMap{D, SB, SQ}, nCells, y, x, cell_ids, wq, ij_mats, ji_mats) where {D, SB, SQ}
+	dof_map = m.dof_map
+	CUDA.Const(ij_mats)
+  CUDA.Const(ji_mats)
+  CUDA.Const(dof_map)
+  tidy = threadIdx().y
+	tidx = threadIdx().x
+	tidx_step  = blockDim().x
+	
+  s1 = blockDim().y*D*SB[1]*SB[2]; s2 = blockDim().y*D*SQ[1]*SB[2]; s3 = blockDim().y*D*SQ[1]*SQ[2];
+  Z  = @cuDynamicSharedMem(Float64,max(s1,s3)+s2)
+  Z1 = view(Z,1:s1)
+  Z2 = view(Z,max(s1,s3)+1:s1+s2)
+  Z3 = view(Z,1:s3)
+
+	cell = (blockIdx().x - 1) * blockDim().y + threadIdx().y
+	while cell <= nCells
+		# Scatter
+		ids = view(cell_ids.data, cell_ids.ptrs[cell]:cell_ids.ptrs[cell+1]-1)
+
+		loop_idx = tidx
+		s = D * SB[1] * SB[2]
+		while loop_idx <= s
+			r, i = @index_to_tuple(loop_idx, D, SB[1] * SB[2])
+			I = dof_map[i]
+			j1 = I[1]
+			j2 = I[2]
+			id = ids[i]
+			z1_idx = (tidy - 1) * s + (j2 - 1) * SB[1] * D + (j1 - 1) * D + r
+
+			Z1[z1_idx] = x[max(id, 1)] * (id > 0)
+			loop_idx += tidx_step
+		end
+		CUDA.sync_threads()
+
+		# Forward pass
+		loop_idx = tidx
+		s = D * SQ[1] * SB[2]
+		while loop_idx <= s
+			r, i1, j2 = @index_to_tuple(loop_idx, D, SQ[1], SB[2])
+
+			z2_idx = (tidy - 1) * s + (j2 - 1) * SQ[1] * D + (i1 - 1) * D + r
+			Z2[z2_idx] = 0.0
+			@inbounds for j1 in 1:SB[1]
+				z1_idx = (tidy - 1) * SB[2] * SB[1] * D + (j2 - 1) * SB[1] * D + (j1 - 1) * D + r
+				Z2[z2_idx] += ji_mats[j1,r,i1,1] * Z1[z1_idx]
+			end
+			loop_idx += tidx_step
+		end
+		CUDA.sync_threads()
+
+		loop_idx = tidx
+		s = D * SQ[1] * SQ[2]
+		while loop_idx <= s
+			r, i1, i2 = @index_to_tuple(loop_idx, D, SQ[1], SQ[2])
+
+			z3_idx = (tidy - 1) * s + (i2 - 1) * SQ[1] * D + (i1 - 1) * D + r
+			Z3[z3_idx] = 0.0
+			@inbounds for j2 in 1:SB[2]
+				z2_idx = (tidy - 1) * SB[2] * SQ[1] * D + (j2 - 1) * SQ[1] * D + (i1 - 1) * D + r
+				Z3[z3_idx] += ji_mats[j2,r,i2,2] * Z2[z2_idx]
+			end
+
+			loop_idx += tidx_step
+		end
+		CUDA.sync_threads()
+
+		# Apply weights 
+		loop_idx = tidx
+		s = D * SQ[1] * SQ[2]
+		while loop_idx <= s
+			r, i1, i2 = @index_to_tuple(loop_idx, D, SQ[1], SQ[2])
+			idx = (i2 - 1) * SQ[1] + i1
+			z3_idx = (tidy - 1) * s + (idx - 1) * D + r
+			Z3[z3_idx] *= wq[idx]
+			loop_idx += tidx_step
+		end
+		CUDA.sync_threads()
+
+		# Backward pass
+		loop_idx = tidx
+		s = D * SQ[1] * SB[2]
+		while loop_idx <= s
+			r, i1, j2 = @index_to_tuple(loop_idx, D, SQ[1], SB[2])
+			z2_idx = (tidy - 1) * s + (j2 - 1) * SQ[1] * D + (i1 - 1) * D + r
+			Z2[z2_idx] = 0.0
+			@inbounds for i2 in 1:SQ[2]
+				z3_idx = (tidy - 1) * SQ[2] * SQ[1] * D + (i2 - 1) * SQ[1] * D + (i1 - 1) * D + r
+				Z2[z2_idx] += ij_mats[i2,r,j2,2] * Z3[z3_idx]
+			end
+			loop_idx += tidx_step
+		end
+		CUDA.sync_threads()
+
+		loop_idx = tidx
+		s = D * SB[1] * SB[2]
+		while loop_idx <= s
+			r, j1, j2 = @index_to_tuple(loop_idx, D, SB[1], SB[2])
+			z1_idx = (tidy - 1) * s + (j2 - 1) * SB[1] * D + (j1 - 1) * D + r
+			Z1[z1_idx] = 0.0
+			@inbounds for i1 in 1:SQ[1]
+				z2_idx = (tidy - 1) * SB[2] * SQ[1] * D + (j2 - 1) * SQ[1] * D + (i1 - 1) * D + r
+				Z1[z1_idx] += ij_mats[i1,r,j1,1] * Z2[z2_idx]
+			end
+			loop_idx += tidx_step
+		end
+		CUDA.sync_threads()
+
+		# Assemble
+		loop_idx = tidx
+		s = D * SB[1] * SB[2]
+		while loop_idx <= s
+			r, i = @index_to_tuple(loop_idx, D, SB[1] * SB[2])
+			I = dof_map[i]
+			j1 = I[1]
+			j2 = I[2]
+			id = ids[i]
+			z1_idx = (tidy - 1) * s + (j2 - 1) * SB[1] * D + (j1 - 1) * D + r
+			if id > 0
+				CUDA.@atomic y[id] += Z1[z1_idx]
+			end
+			loop_idx += tidx_step
+		end
+		CUDA.sync_threads()
+
+		cell += gridDim().x * blockDim().y
+	end
+
+	return
+end
+
+
+"""
+  SUMFAC-GPU Kernel v4
+  Fifth version. Using MVectors instead of shared memory for the work vectors. 
+	 - We process blockDim().y cells at the same time.
+	 - We use blockDim().x threads to process each cell.
+"""
+function gpu_mul_v4!(m::SumFactorizationMap{D, SB, SQ}, nCells, y, x, cell_ids, wq, ij_mats, ji_mats,::Val{blockdim}) where {D, SB, SQ, blockdim}
+	dof_map = m.dof_map
+	CUDA.Const(ij_mats)
+  CUDA.Const(ji_mats)
+  CUDA.Const(dof_map)
+  tidy = threadIdx().y
+	tidx = threadIdx().x
+	tidx_step  = blockdim[1]
+	
+  s1 = D*SB[1]*SB[2]
+	s2 = D*SQ[1]*SB[2]
+	s3 = D*SQ[1]*SQ[2]
+  Z1 = zero(MVector{max(s1,s3),Float64})
+  Z2 = zero(MVector{s2,Float64})
+  Z3 = Z1
+
+	cell = (blockIdx().x - 1) * blockdim[2] + threadIdx().y
+	while cell <= nCells
+		# Scatter
+		ids = view(cell_ids.data, cell_ids.ptrs[cell]:cell_ids.ptrs[cell+1]-1)
+
+		loop_idx = tidx
+		s = D * SB[1] * SB[2]
+		while loop_idx <= s
+			r, i = @index_to_tuple(loop_idx, D, SB[1] * SB[2])
+			I = dof_map[i]
+			j1 = I[1]
+			j2 = I[2]
+			id = ids[i]
+			z1_idx = (j2 - 1) * SB[1] * D + (j1 - 1) * D + r
+
+			Z1[z1_idx] = x[max(id, 1)] * (id > 0)
+			loop_idx += tidx_step
+		end
+		CUDA.sync_threads()
+
+		# Forward pass
+		loop_idx = tidx
+		s = D * SQ[1] * SB[2]
+		while loop_idx <= s
+			r, i1, j2 = @index_to_tuple(loop_idx, D, SQ[1], SB[2])
+
+			z2_idx = (j2 - 1) * SQ[1] * D + (i1 - 1) * D + r
+			Z2[z2_idx] = 0.0
+			@inbounds for j1 in 1:SB[1]
+				z1_idx = (j2 - 1) * SB[1] * D + (j1 - 1) * D + r
+				Z2[z2_idx] += ji_mats[j1,r,i1,1] * Z1[z1_idx]
+			end
+			loop_idx += tidx_step
+		end
+		CUDA.sync_threads()
+
+		loop_idx = tidx
+		s = D * SQ[1] * SQ[2]
+		while loop_idx <= s
+			r, i1, i2 = @index_to_tuple(loop_idx, D, SQ[1], SQ[2])
+
+			z3_idx = (i2 - 1) * SQ[1] * D + (i1 - 1) * D + r
+			Z3[z3_idx] = 0.0
+			@inbounds for j2 in 1:SB[2]
+				z2_idx = (j2 - 1) * SQ[1] * D + (i1 - 1) * D + r
+				Z3[z3_idx] += ji_mats[j2,r,i2,2] * Z2[z2_idx]
+			end
+
+			loop_idx += tidx_step
+		end
+		CUDA.sync_threads()
+
+		# Apply weights 
+		loop_idx = tidx
+		s = D * SQ[1] * SQ[2]
+		while loop_idx <= s
+			r, i1, i2 = @index_to_tuple(loop_idx, D, SQ[1], SQ[2])
+			idx = (i2 - 1) * SQ[1] + i1
+			z3_idx = (idx - 1) * D + r
+			Z3[z3_idx] *= wq[idx]
+			loop_idx += tidx_step
+		end
+		CUDA.sync_threads()
+
+		# Backward pass
+		loop_idx = tidx
+		s = D * SQ[1] * SB[2]
+		while loop_idx <= s
+			r, i1, j2 = @index_to_tuple(loop_idx, D, SQ[1], SB[2])
+			z2_idx = (j2 - 1) * SQ[1] * D + (i1 - 1) * D + r
+			Z2[z2_idx] = 0.0
+			@inbounds for i2 in 1:SQ[2]
+				z3_idx = (i2 - 1) * SQ[1] * D + (i1 - 1) * D + r
+				Z2[z2_idx] += ij_mats[i2,r,j2,2] * Z3[z3_idx]
+			end
+			loop_idx += tidx_step
+		end
+		CUDA.sync_threads()
+
+		loop_idx = tidx
+		s = D * SB[1] * SB[2]
+		while loop_idx <= s
+			r, j1, j2 = @index_to_tuple(loop_idx, D, SB[1], SB[2])
+			z1_idx = (j2 - 1) * SB[1] * D + (j1 - 1) * D + r
+			Z1[z1_idx] = 0.0
+			@inbounds for i1 in 1:SQ[1]
+				z2_idx = (j2 - 1) * SQ[1] * D + (i1 - 1) * D + r
+				Z1[z1_idx] += ij_mats[i1,r,j1,1] * Z2[z2_idx]
+			end
+			loop_idx += tidx_step
+		end
+		CUDA.sync_threads()
+
+		# Assemble
+		loop_idx = tidx
+		s = D * SB[1] * SB[2]
+		while loop_idx <= s
+			r, i = @index_to_tuple(loop_idx, D, SB[1] * SB[2])
+			I = dof_map[i]
+			j1 = I[1]
+			j2 = I[2]
+			id = ids[i]
+			z1_idx = (j2 - 1) * SB[1] * D + (j1 - 1) * D + r
+			if id > 0
+				CUDA.@atomic y[id] += Z1[z1_idx]
+			end
+			loop_idx += tidx_step
+		end
+		CUDA.sync_threads()
+
+		cell += gridDim().x * blockdim[2]
+	end
+
+	return
+end

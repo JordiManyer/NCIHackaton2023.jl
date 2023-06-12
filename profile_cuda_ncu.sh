@@ -13,9 +13,9 @@ module load nvidia-hpc-sdk/22.11
 
 export LD_LIBRARY_PATH=~/bin/julia-1.8.5/lib/julia/:$LD_LIBRARY_PATH
 
-ncu --set full -k regex:gpu_mul --target-processes all -o result julia --project=. test/GPU_v1.jl
+ncu --set full -k regex:gpu_mul --target-processes all -o result_v1 julia --project=. test/GPU_v1.jl
+ncu --set full -k regex:gpu_mul --target-processes all -o result_v3 julia --project=. test/GPU_v3.jl
 
 #ncu launch --trace cuda julia --project=. -e'include("test/GPU_v0.jl")'
 #ncu launch --trace cuda julia --project=. -e'include("test/GPU_v1.jl")'
-
 

@@ -19,6 +19,7 @@ function benchmark_kernel(kernel, config, args, niter)
 	time = CUDA.@elapsed begin
 		for i in 1:niter
 			CUDA.@sync kernel(args...; config...)
+      #GC.gc(true); CUDA.reclaim()
 		end
 	end
 	return time / niter

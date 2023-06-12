@@ -3,6 +3,7 @@ module NCIHackaton2023
 using FillArrays
 using LoopVectorization
 using LinearAlgebra
+using StaticArrays
 
 using CUDA
 using Adapt
@@ -28,6 +29,8 @@ export to_gpu
 export gpu_mul_v0!
 export gpu_mul_v1!
 export gpu_mul_v2!
+export gpu_mul_v3!
+export gpu_mul_v4!
 
 export count_manual_flops_poisson_matrix_free
 

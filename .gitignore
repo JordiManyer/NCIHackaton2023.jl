@@ -34,6 +34,7 @@ Manifest.toml
 *.o*
 *.e*
 *.nsys-rep
+*.ncu-rep
 
 # System Image
 Environment.so

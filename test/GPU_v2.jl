@@ -1,6 +1,6 @@
 """
-  SUMFAC-GPU v1
-  Basic kernel. Everything comes from memory, but more parallel.
+  SUMFAC-GPU v2
+  Basic kernel. Starting to take advantage of Shared & Constant memory. 
 """
 
 using Test
@@ -16,8 +16,8 @@ using NCIHackaton2023
 
 # Parameters
 D           = 2                    # Problem dimension
-fe_orders   = Tuple(fill(1, D))    # FE element orders
-quad_orders = Tuple(fill(4, D))    # Quadrature orders 
+fe_orders   = Tuple(fill(4, D))    # FE element orders
+quad_orders = Tuple(fill(6, D))    # Quadrature orders 
 
 # Setup
 n         = 512
@@ -47,8 +47,6 @@ A_lazy = LazyMatrix(m, U, V, dΩ)
 ############################################################################################
 # GPU implementation
 nCells = num_cells(Ω)
-nt = 4 * 192
-nb = 80
 
 gpu_m = to_gpu(m)
 gpu_cell_dof_ids = to_gpu(get_cell_dof_ids(U));
@@ -60,33 +58,25 @@ gpu_djq = CuArray(cell_djq.value)
 
 # Caches
 D, SB, SQ = get_dimensional_parameters(m)
-gpu_Zk = [CuArray(zeros(nb * nt * D * prod(SQ[1:d-1]) * prod(SB[d:D]))) for d in 1:D+1]
 
 # Comparison CPU vs GPU
 x_ref = ones(size(b))
 x = CuArray(x_ref)
 y = CuArray(zeros(size(b)))
-kernel_args = (gpu_m, nCells, y, x, gpu_cell_dof_ids, gpu_wq, gpu_Zk...)
+kernel_args = (gpu_m, nCells, y, x, gpu_cell_dof_ids, gpu_wq)
 
-kernel = @cuda name = "gpu_mul_v1" launch = false gpu_mul_v1!(kernel_args...);
+kernel = @cuda name = "gpu_mul_v2" launch = false gpu_mul_v2!(kernel_args...);
 config = launch_configuration(kernel.fun)
 
-config = (threads = (32,20), blocks = 80)
-kernel(kernel_args...; config...)
+mem = 16*D*(prod(SB) + SQ[1]*SB[2] + prod(SQ))*sizeof(Float64)
+config = (threads=(32,16),blocks=160,shmem=mem)
+kernel(kernel_args...;config...)
 
 y_ref = zeros(length(b))
-mul!(y_ref, A_lazy, x_ref)
+@elapsed mul!(y_ref, A_lazy, x_ref)
 
 cpu_y = Array(y)
 cpu_y ≈ y_ref
 
-# Profile
-CUDA.@profile begin
-	for iter in 1:10
-		CUDA.@sync kernel(kernel_args...; config...)
-	end
-end
-
-# Benchmark
 niter = 100
 time = NCIHackaton2023.benchmark_kernel(kernel, config, kernel_args, niter)

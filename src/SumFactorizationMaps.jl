@@ -28,7 +28,8 @@ function to_gpu(m::SumFactorizationMap{D, SB, SQ}) where {D, SB, SQ}
 		mats[:, :, r, k] = m.mats[2][r, k]
 	end
 	gpu_mats = CuArray(mats)
-	return SumFactorizationMap{D, SB, SQ}(gpu_mats, CuArray(m.dof_map))
+	D_32 = Int32(D); SB_32 = Tuple(map(Int32,SB)); SQ_32 = Tuple(map(Int32,SQ))
+	return SumFactorizationMap{D_32, SB_32, SQ_32}(gpu_mats, CuArray(m.dof_map))
 end
 
 function _get_terms(poly::Polytope, orders)

@@ -16,8 +16,8 @@ using NCIHackaton2023
 
 # Parameters
 D           = 2                    # Problem dimension
-fe_orders   = Tuple(fill(1, D))    # FE element orders
-quad_orders = Tuple(fill(4, D))    # Quadrature orders 
+fe_orders   = Tuple(fill(4, D))    # FE element orders
+quad_orders = Tuple(fill(6, D))    # Quadrature orders 
 
 # Setup
 n         = 512
@@ -47,8 +47,8 @@ A_lazy = LazyMatrix(m, U, V, dΩ)
 ############################################################################################
 # GPU implementation
 nCells = num_cells(Ω)
-nt = 4 * 192
-nb = 80
+nt = 16*56
+nb = 320
 
 gpu_m = to_gpu(m)
 gpu_cell_dof_ids = to_gpu(get_cell_dof_ids(U));
@@ -71,7 +71,7 @@ kernel_args = (gpu_m, nCells, y, x, gpu_cell_dof_ids, gpu_wq, gpu_Zk...)
 kernel = @cuda name = "gpu_mul_v1" launch = false gpu_mul_v1!(kernel_args...);
 config = launch_configuration(kernel.fun)
 
-config = (threads = (32,20), blocks = 80)
+config = (threads = (16,56), blocks = 320)
 kernel(kernel_args...; config...)
 
 y_ref = zeros(length(b))
@@ -80,13 +80,12 @@ mul!(y_ref, A_lazy, x_ref)
 cpu_y = Array(y)
 cpu_y ≈ y_ref
 
-# Profile
+# Benchmark
+niter = 100
+time = NCIHackaton2023.benchmark_kernel(kernel, config, kernel_args, niter)
+
 CUDA.@profile begin
 	for iter in 1:10
 		CUDA.@sync kernel(kernel_args...; config...)
 	end
 end
-
-# Benchmark
-niter = 100
-time = NCIHackaton2023.benchmark_kernel(kernel, config, kernel_args, niter)

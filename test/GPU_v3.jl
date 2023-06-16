@@ -1,6 +1,6 @@
 """
-  SUMFAC-GPU v2
-  Basic kernel. Starting to take advantage of Shared & Constant memory. 
+  SUMFAC-GPU v3
+  Tackling the issue of memory access coalescence. 
 """
 
 using Test
@@ -20,7 +20,7 @@ fe_orders   = Tuple(fill(4, D))    # FE element orders
 quad_orders = Tuple(fill(6, D))    # Quadrature orders 
 
 # Setup
-n         = 1024
+n         = 512
 domain    = repeat([0, 1], D)
 partition = fill(n, D)
 model     = CartesianDiscreteModel(domain, partition)
@@ -53,6 +53,16 @@ function get_mats(m::SumFactorizationMap{D, SB, SQ}) where {D, SB, SQ}
 	return CuArray(ij_mats), CuArray(ji_mats)
 end
 
+function get_dof_map(m::SumFactorizationMap{D, SB, SQ}) where {D, SB, SQ}
+	dof_map = Vector{Int32}(undef,prod(SB))
+	for i in 1:prod(SB)
+		I = m.dof_map[i]; j1 = Int32(I[1]); j2 = Int32(I[2])
+		idx = (j2 - 1) * SB[1] + j1
+		dof_map[idx] = i 
+	end
+	return CuArray(dof_map)
+end
+
 ############################################################################################
 ############################################################################################
 # GPU implementation
@@ -61,6 +71,7 @@ nCells = num_cells(Ω)
 gpu_m = to_gpu(m)
 gpu_cell_dof_ids = to_gpu(get_cell_dof_ids(U));
 ij_mats, ji_mats = get_mats(m)
+dof_map = get_dof_map(m)
 
 cell_wq, cell_jq, cell_djq = A_lazy.cell_quantities
 gpu_wq = CuArray(cell_wq.value)
@@ -68,24 +79,24 @@ gpu_jq = CuArray(cell_jq.value)
 gpu_djq = CuArray(cell_djq.value)
 
 # Caches
-D, SB, SQ = get_dimensional_parameters(m)
+D, SB, SQ = get_dimensional_parameters(gpu_m)
 
 # Comparison CPU vs GPU
 x_ref = ones(size(b))
 x = CuArray(x_ref)
 y = CuArray(zeros(size(b)))
-kernel_args = (gpu_m, nCells, y, x, gpu_cell_dof_ids, gpu_wq, ij_mats, ji_mats)
+kernel_args = (gpu_m, nCells, y, x, gpu_cell_dof_ids, gpu_wq, ij_mats, ji_mats, dof_map)
 
 kernel = @cuda name = "gpu_mul_v3" launch = false gpu_mul_v3!(kernel_args...);
 config = launch_configuration(kernel.fun)
 
-mem = 16*D*(max(prod(SB),prod(SQ)) + SQ[1]*SB[2])*sizeof(Float64)
-config = (threads=(16,16),blocks=320,shmem=mem)
+mem = 32*D*(max(prod(SB),prod(SQ)) + SQ[1]*SB[2])*sizeof(Float64)
+config = (threads=(8,32),blocks=320,shmem=mem)
 kernel(kernel_args...;config...)
 
 y_ref = zeros(length(b))
 @elapsed mul!(y_ref, A_lazy, x_ref)
-@elapsed mul!(y_ref, A, x_ref)
+#@elapsed mul!(y_ref, A, x_ref)
 
 cpu_y = Array(y)
 cpu_y ≈ y_ref

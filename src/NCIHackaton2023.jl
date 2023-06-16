@@ -31,6 +31,9 @@ export gpu_mul_v1!
 export gpu_mul_v2!
 export gpu_mul_v3!
 export gpu_mul_v4!
+export gpu_mul_v5!
+export gpu_mul_v6!
+export gpu_mul_v7!
 
 export count_manual_flops_poisson_matrix_free
 

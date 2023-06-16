@@ -2,6 +2,8 @@
 
 Repo for the NCI-NVIDIA hackaton on June 2023.
 
+This work was completed in part at the NCI-NVIDIA hackaton, part of the Open Hackathons program. The authors would like to acknowledge OpenACC-Standard.org for their support.
+
 ## Objective
 
 The objective is to implement sum-factorization techniques for GPU architectures, within

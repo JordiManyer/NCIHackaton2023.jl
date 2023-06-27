@@ -92,7 +92,7 @@ kernel = @cuda name = "gpu_mul_v7" launch = false gpu_mul_v7!(kernel_args...);
 config = launch_configuration(kernel.fun)
 
 mem = 64*D*(max(prod(SB),prod(SQ)) + SQ[1]*SB[2])*sizeof(Float64) + 2*D*D*SB[1]*SQ[1]*sizeof(Float64)
-config = (threads=(8,64),blocks=1280)#,shmem=mem)
+config = (threads=(5,64),blocks=1280)#,shmem=mem)
 kernel(kernel_args...;config...)
 
 y_ref = zeros(nDofs)

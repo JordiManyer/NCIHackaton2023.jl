@@ -925,21 +925,13 @@ end
 		tidy = threadIdx().y
 		tidx = threadIdx().x
 
-		Z  = @cuStaticSharedMem(Float64,$(s13+s2+2*smats))
+		Z  = @cuStaticSharedMem(Float64,$(s13+s2))
 		Z1 = view(Z,1:$(s13))
 		Z2 = view(Z,$(s13+1):$(s13+s2))
 		Z3 = view(Z,1:$(s13))
 
 		# Bring matrices to shared memory
-		f_mats = view(Z,$(s13+s2+1):$(s13+s2+smats))
-		b_mats = view(Z,$(s13+s2+smats+1):$(s13+s2+2*smats))
-		loop_idx = (tidy-1) * $(blockdims[1]) + tidx
-		while loop_idx <= $(smats)
-			f_mats[loop_idx] = ij_mats[loop_idx]
-			b_mats[loop_idx] = ji_mats[loop_idx]
-			loop_idx += $(blockdims[1]*blockdims[2])
-		end
-
+		ids = @cuStaticSharedMem(Int64,$smaps)
 		dof_map = @cuStaticSharedMem(Int32,$smaps)
 		loop_idx = (tidy-1) * $(blockdims[1]) + tidx
 		while loop_idx <= $(smaps)
@@ -949,14 +941,30 @@ end
 
 		CUDA.sync_threads()
 
+		f_mats = @cuStaticSharedMem(Float64,$smats)
+		#b_mats = @cuStaticSharedMem(Float64,$smats)
+		loop_idx = (tidy-1) * $(blockdims[1]) + tidx
+		while loop_idx <= $(smats)
+			f_mats[loop_idx] = ij_mats[loop_idx]
+			#b_mats[loop_idx] = ji_mats[loop_idx]
+			loop_idx += $(blockdims[1]*blockdims[2])
+		end
+		b_mats = f_mats
+
 		cell = (blockIdx().x - 1) * $(blockdims[2]) + threadIdx().y
 		while cell <= nCells
 			# Scatter
-			ids = view(cell_ids.data, cell_ids.ptrs[cell]:cell_ids.ptrs[cell+1]-1)
+			_ids = view(cell_ids.data, cell_ids.ptrs[cell]:cell_ids.ptrs[cell+1]-1)
+			loop_idx = tidx
+			while loop_idx <= $(SB[1] * SB[2])
+				ids[loop_idx] = _ids[dof_map[loop_idx]]
+				loop_idx += blockdims[1]
+			end
+			CUDA.sync_threads()
 
 			loop_idx = tidx
 			while loop_idx <= $(SB[1] * SB[2])
-				id = ids[dof_map[loop_idx]]
+				id = ids[loop_idx] #ids[dof_map[loop_idx]]
 				xi = x[abs(id)] * (id > 0)
 				@inbounds for r in 1:$D
 					z1_idx = (tidy - 1) * $(D * SB[1] * SB[2]) + (loop_idx - 1) * $D + r
@@ -1049,7 +1057,7 @@ end
 			# Assemble
 			loop_idx = tidx
 			while loop_idx <= $(SB[1] * SB[2])
-				id = ids[dof_map[loop_idx]]
+				id = ids[loop_idx] #ids[dof_map[loop_idx]]
 				yi = 0.0
 				@inbounds for r in 1:D
 					z1_idx = (tidy - 1) * $(D * SB[1] * SB[2]) + (loop_idx - 1) * $D + r

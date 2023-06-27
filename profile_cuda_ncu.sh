@@ -1,12 +1,12 @@
 #!/bin/bash
-#PBS -P vp91
+#PBS -P kr97
 #PBS -q gpuvolta
 #PBS -l walltime=01:00:00
 #PBS -l ncpus=12
 #PBS -l ngpus=1
 #PBS -l mem=90GB
 #PBS -l jobfs=10GB
-#PBS -l storage=scratch/vp91
+#PBS -l storage=scratch/kr97
 
 module load cuda
 module load nvidia-hpc-sdk/22.11
